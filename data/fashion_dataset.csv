@@ -1,0 +1,51 @@
+item_id,category,item_name,colour,shade,style,occasion,price,image
+1,Top,White Cotton Shirt,White,Light,Formal,Office|Interview,1299,white_cotton_shirt.jpg
+2,Top,Navy Oxford Shirt,Navy,Dark,Formal|Smart Casual,Office|Interview,1599,navy_oxford_shirt.jpg
+3,Top,Black Polo,Black,Dark,Casual|Trendy,College|Party,899,black_polo.jpg
+4,Top,Teal Casual Shirt,Teal,Medium,Casual|Smart Casual,College|Party,1199,teal_casual_shirt.jpg
+5,Top,Olive Overshirt,Olive,Medium,Trendy|Casual,College|Festival,1499,olive_overshirt.jpg
+6,Top,Maroon Kurta,Maroon,Dark,Ethnic,Festival|Party,1799,maroon_kurta.jpg
+7,Top,Cream Linen Shirt,Cream,Light,Smart Casual|Formal,Office|Party,1899,cream_linen_shirt.jpg
+8,Top,Mustard T-Shirt,Mustard,Medium,Casual|Trendy,College|Festival,699,mustard_tshirt.jpg
+9,Top,Blue Denim Shirt,Blue,Medium,Casual|Trendy,College|Party,1399,blue_denim_shirt.jpg
+10,Top,Coral Blouse,Coral,Light,Trendy|Formal,Party|Office,1599,coral_blouse.jpg
+11,Top,Lavender Shirt,Lavender,Light,Formal|Trendy,Office|Party,1499,lavender_shirt.jpg
+12,Top,Forest Green Tee,Forest Green,Dark,Casual,College|Festival,799,forest_green_tee.jpg
+13,Top,Beige Printed Kurta,Beige,Light,Ethnic,Festival|Party,1399,beige_printed_kurta.jpg
+14,Top,Cobalt Blue Shirt,Cobalt Blue,Dark,Formal|Trendy,Office|Party,1699,cobalt_blue_shirt.jpg
+15,Top,Rust Henley,Rust,Medium,Casual|Smart Casual,College|Party,999,rust_henley.jpg
+16,Bottom,Black Chinos,Black,Dark,Formal|Smart Casual,Office|Interview,1799,black_chinos.jpg
+17,Bottom,Navy Trousers,Navy,Dark,Formal,Office|Interview,1999,navy_trousers.jpg
+18,Bottom,Blue Jeans,Blue,Medium,Casual|Trendy,College|Party,1499,blue_jeans.jpg
+19,Bottom,Beige Chinos,Beige,Light,Smart Casual,Office|Party,1699,beige_chinos.jpg
+20,Bottom,Olive Cargo Pants,Olive,Medium,Trendy|Casual,College|Festival,1599,olive_cargo_pants.jpg
+21,Bottom,White Cotton Pants,White,Light,Smart Casual|Ethnic,Party|Festival,1399,white_cotton_pants.jpg
+22,Bottom,Grey Formal Trousers,Grey,Medium,Formal,Office|Interview,1899,grey_formal_trousers.jpg
+23,Bottom,Maroon Dhoti Pants,Maroon,Dark,Ethnic,Festival|Party,1299,maroon_dhoti_pants.jpg
+24,Bottom,Khaki Shorts,Khaki,Medium,Casual,College|Party,899,khaki_shorts.jpg
+25,Bottom,Charcoal Joggers,Charcoal,Dark,Casual|Trendy,College,999,charcoal_joggers.jpg
+26,Shoes,White Sneakers,White,Light,Casual|Trendy,College|Party,799,white_sneakers.jpg
+27,Shoes,Black Formal Shoes,Black,Dark,Formal,Office|Interview,2499,black_formal_shoes.jpg
+28,Shoes,Brown Loafers,Brown,Medium,Smart Casual|Formal,Office|Party,2299,brown_loafers.jpg
+29,Shoes,Blue Canvas Shoes,Blue,Medium,Casual,College|Party,999,blue_canvas_shoes.jpg
+30,Shoes,Tan Sandals,Tan,Medium,Ethnic|Casual,Festival|College,699,tan_sandals.jpg
+31,Shoes,Maroon Juttis,Maroon,Dark,Ethnic,Festival|Party,1199,maroon_juttis.jpg
+32,Shoes,White Slip Ons,White,Light,Smart Casual|Casual,College|Party,899,white_slip_ons.jpg
+33,Shoes,Brown Derby Shoes,Brown,Medium,Formal,Office|Interview,2699,brown_derby_shoes.jpg
+34,Shoes,Green Trainers,Green,Dark,Trendy|Casual,College|Party,1299,green_trainers.jpg
+35,Shoes,Black Chelsea Boots,Black,Dark,Trendy|Formal,Party|Office,2999,black_chelsea_boots.jpg
+36,Accessory,Leather Belt,Brown,Medium,Formal|Smart Casual,Office|Interview,499,leather_belt.jpg
+37,Accessory,Silver Watch,Silver,Light,Formal|Trendy,Office|Party,1499,silver_watch.jpg
+38,Accessory,Canvas Backpack,Black,Dark,Casual|Trendy,College,999,canvas_backpack.jpg
+39,Accessory,Minimal Wallet,Black,Dark,Formal|Casual,Office|College,399,minimal_wallet.jpg
+40,Accessory,Blue Scarf,Blue,Medium,Trendy|Ethnic,Party|Festival,699,blue_scarf.jpg
+41,Accessory,Beaded Bracelet,Maroon,Dark,Trendy|Ethnic,Party|Festival,449,beaded_bracelet.jpg
+42,Accessory,Gold Earrings,Gold,Light,Ethnic|Formal,Party|Festival,899,gold_earrings.jpg
+43,Accessory,Structured Handbag,Black,Dark,Formal|Trendy,Office|Party,1899,structured_handbag.jpg
+44,Accessory,White Pocket Square,White,Light,Formal,Office|Interview,299,white_pocket_square.jpg
+45,Accessory,Statement Sunglasses,Black,Dark,Trendy|Casual,College|Party,799,statement_sunglasses.jpg
+46,Accessory,Mustard Tote Bag,Mustard,Medium,Casual|Trendy,College|Festival,899,mustard_tote_bag.jpg
+47,Accessory,Silver Chain,Silver,Light,Trendy|Casual,Party|College,599,silver_chain.jpg
+48,Accessory,Ethnic Stole,Cream,Light,Ethnic,Festival|Party,799,ethnic_stole.jpg
+49,Accessory,Classic Tie,Navy,Dark,Formal,Office|Interview,599,classic_tie.jpg
+50,Accessory,Green Cap,Green,Dark,Casual|Trendy,College|Party,499,green_cap.jpg

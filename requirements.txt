@@ -1,0 +1,12 @@
+streamlit
+pandas
+numpy
+pillow
+scikit-learn
+requests
+fastapi
+uvicorn[standard]
+python-multipart
+# testing
+pytest
+httpx
