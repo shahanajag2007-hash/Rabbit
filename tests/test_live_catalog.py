@@ -208,3 +208,15 @@ def test_only_due_brands_are_refreshed(tmp_path):
     catalog._snapshot["brands"]["demo"]["fetched_at"] = "2000-01-01T00:00:00+00:00"
     assert catalog.due_brands() == [good, down]
     assert catalog_module.RETRY_MINUTES > 0
+
+
+def test_fresh_checkout_starts_from_seed(tmp_path):
+    seeded = make_catalog(tmp_path / "a")
+    seeded.refresh()  # writes a/snap.json, used here as the committed seed
+    fresh = LiveCatalog(snapshot_path=tmp_path / "b" / "snap.json", seed_path=tmp_path / "a" / "snap.json",
+                        brands=[Brand("demo", "Demo", "demo.example.com")],
+                        fallback_loader=recommender.load_dataset, fetcher_factory=FakeFetcher)
+    assert fresh.source() == "live"
+    assert len(fresh.frame()) == len(seeded.frame())
+    fresh.refresh()
+    assert (tmp_path / "b" / "snap.json").exists()  # refreshes go to the local snapshot, never the seed

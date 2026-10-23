@@ -96,8 +96,12 @@ product descriptions are parsed with BeautifulSoup.
   error is shown in `/api/catalog/status`.
 - **Gender:** Female profiles get women's + unisex products, Male profiles men's + unisex,
   Non-binary everything.
-- **Fallback:** only before the very first successful scrape (e.g. offline first run) the bundled CSV
-  is used; `/api/health` reports `catalog_source: "static-fallback"` until live data exists.
+- **New laptop / fresh clone:** the repo includes a scraped snapshot, `data/live_catalog_seed.json`,
+  so a fresh copy shows the same real products straight away and refreshes them in the background
+  (into `data/live_catalog.json`, which is not committed). To update the committed products, copy
+  `data/live_catalog.json` over the seed file and commit it.
+- **Fallback:** only if neither file exists is the bundled CSV used; `/api/health` reports
+  `catalog_source: "static-fallback"` until live data exists.
 - **Cheaper alternatives:** the "Brand stores" shopping provider suggests cheaper, similar products
   from the live catalogue, with links to the brand's product page.
 

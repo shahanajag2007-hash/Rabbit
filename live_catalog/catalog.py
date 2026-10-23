@@ -4,8 +4,9 @@
 - A refresh runs in a background thread when the snapshot is older than the TTL; requests never
   wait for scraping. Each brand is refreshed independently: a brand that fails keeps its
   previous products.
-- The snapshot (``data/live_catalog.json``) survives restarts. Only when no snapshot exists yet
-  (first start, offline) is the bundled CSV used, reported as ``source="static-fallback"``.
+- The snapshot (``data/live_catalog.json``, not in git) survives restarts. A fresh checkout starts
+  from the committed seed (``data/live_catalog_seed.json``) and refreshes it in the background.
+  Only when neither exists is the bundled CSV used, reported as ``source="static-fallback"``.
 """
 from __future__ import annotations
 
@@ -28,11 +29,12 @@ logger = logging.getLogger("styleai.live_catalog")
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SNAPSHOT = ROOT / "data" / "live_catalog.json"
+DEFAULT_SEED = ROOT / "data" / "live_catalog_seed.json"
 REQUIRED_CATEGORIES = ("Top", "Bottom", "Shoes", "Accessory")
-# Newest products per brand and category: keeps the catalogue balanced across brands and the
-# recommender's per-request ranking fast.
 # A brand whose scrape failed (usually rate limiting) is retried after this many minutes.
 RETRY_MINUTES = float(os.environ.get("STYLEAI_CATALOG_RETRY_MINUTES", "30"))
+# Newest products per brand and category: keeps the catalogue balanced across brands and the
+# recommender's per-request ranking fast.
 PER_BRAND_CATEGORY_LIMIT = int(os.environ.get("STYLEAI_CATALOG_PER_BRAND_CATEGORY", "80"))
 
 
@@ -68,10 +70,14 @@ class LiveCatalog:
         ttl_hours: float = float(os.environ.get("STYLEAI_CATALOG_TTL_HOURS", "6")),
         fallback_loader: Optional[Callable[[], pd.DataFrame]] = None,
         fetcher_factory: Callable[[], PoliteFetcher] = PoliteFetcher,
+        seed_path: Optional[Path] = None,
     ):
         selected = {key.strip() for key in os.environ.get("STYLEAI_CATALOG_BRANDS", "").split(",") if key.strip()}
         self.brands = [brand for brand in brands if not selected or brand.key in selected]
         self.snapshot_path = Path(snapshot_path)
+        if seed_path is None and self.snapshot_path == DEFAULT_SNAPSHOT:
+            seed_path = DEFAULT_SEED
+        self.seed_path = Path(seed_path) if seed_path else None
         self.ttl_hours = ttl_hours
         self.fallback_loader = fallback_loader
         self._fetcher = fetcher_factory()  # one fetcher: shared spacing and cached robots.txt
@@ -86,14 +92,19 @@ class LiveCatalog:
     # -- snapshot ------------------------------------------------------------
 
     def _load_snapshot(self) -> Dict:
-        try:
-            data = json.loads(self.snapshot_path.read_text(encoding="utf-8"))
-            if isinstance(data.get("brands"), dict):
-                return data
-        except FileNotFoundError:
-            pass
-        except (OSError, ValueError) as exc:
-            logger.warning("Ignoring unreadable catalogue snapshot %s: %s", self.snapshot_path, exc)
+        for path in (self.snapshot_path, self.seed_path):
+            if path is None:
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data.get("brands"), dict):
+                    if path == self.seed_path:
+                        logger.info("No local catalogue yet; starting from the committed seed %s", path.name)
+                    return data
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError) as exc:
+                logger.warning("Ignoring unreadable catalogue snapshot %s: %s", path, exc)
         return {"brands": {}, "refreshed_at": None}
 
     def _save_snapshot(self, snapshot: Dict) -> None:
