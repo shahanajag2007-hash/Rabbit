@@ -4,6 +4,8 @@ numpy
 pillow
 scikit-learn
 requests
+beautifulsoup4
+truststore
 fastapi
 uvicorn[standard]
 python-multipart

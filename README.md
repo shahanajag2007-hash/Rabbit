@@ -6,7 +6,8 @@ A React + Three.js dashboard on top of the existing Python recommendation engine
 frontend/   React 19 + Vite + TypeScript + React Three Fiber (the new UI)
 api/        FastAPI layer exposing the existing Python modules over HTTP
 recommender.py, skin_tone.py, avatar_engine.py, demo_data.py, shopping/   existing backend (unchanged logic)
-data/fashion_dataset.csv   product catalogue (50 items)
+live_catalog/   real-time product catalogue scraped from brand storefronts (see below)
+data/fashion_dataset.csv   original 50-item catalogue (offline fallback, tests, Streamlit app)
 app.py, pages/, ui_theme.py   original Streamlit app (kept for comparison/rollback)
 tests/      API tests (pytest)
 ```
@@ -72,6 +73,37 @@ time and add that origin to `STYLEAI_CORS_ORIGINS` on the backend.
 streamlit run app.py
 ```
 
+## Live product catalogue (brand stores)
+
+Recommended products are real, in-stock products scraped from Indian brand storefronts:
+Snitch, Powerlook, Rare Rabbit / Rareism, Libas, Offduty, Bonkers Corner, Urban Monkey, Campus and
+Red Tape (`live_catalog/brands.py`). All of them run on Shopify, whose public storefront feed
+`/products.json` is read with `requests` (no paid scraping service, no API key, no headless browser);
+product descriptions are parsed with BeautifulSoup.
+
+- **Polite scraping:** robots.txt is checked for every site; requests go one at a time (4 s per site,
+  3 s between any two requests); HTTP 429 backs off (honouring `Retry-After`) and retries.
+- **Mapping:** each product becomes one row per in-stock colour in the recommender's schema
+  (`category`, `item_name`, `colour`, `shade`, `style`, `occasion`, `price`, `image`), plus `brand`,
+  `product_url`, `mrp`, `gender`, `fabric`, `fabric_tag`. Category, style, occasion, gender and fabric are
+  inferred from the title, product type, tags and description (`live_catalog/normalize.py`). Colours
+  are normalised to the palette names (e.g. "Navy Blue" -> Navy, "Wine" -> Burgundy). Dresses, sets,
+  sarees, innerwear, crop tops and non-clothing items are skipped (no single outfit slot / professional look).
+- **Freshness:** the snapshot `data/live_catalog.json` is refreshed in a background thread on startup
+  per brand: a brand is re-scraped when its data is older than `STYLEAI_CATALOG_TTL_HOURS`, and each
+  brand's products are saved as soon as it finishes. Requests never wait for scraping. A brand whose
+  refresh fails keeps its previous products, is retried after `STYLEAI_CATALOG_RETRY_MINUTES`, and its
+  error is shown in `/api/catalog/status`.
+- **Gender:** Female profiles get women's + unisex products, Male profiles men's + unisex,
+  Non-binary everything.
+- **Fallback:** only before the very first successful scrape (e.g. offline first run) the bundled CSV
+  is used; `/api/health` reports `catalog_source: "static-fallback"` until live data exists.
+- **Cheaper alternatives:** the "Brand stores" shopping provider suggests cheaper, similar products
+  from the live catalogue, with links to the brand's product page.
+
+Refresh manually: `curl -X POST http://localhost:8000/api/catalog/refresh`, then check
+`curl http://localhost:8000/api/catalog/status`.
+
 ## Environment variables
 
 Backend (read by `api/` and `shopping/`; set in your shell or process manager, never in the frontend):
@@ -79,6 +111,11 @@ Backend (read by `api/` and `shopping/`; set in your shell or process manager, n
 | Variable | Default | Purpose |
 | -------- | ------- | ------- |
 | `STYLEAI_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed browser origins |
+| `STYLEAI_CATALOG_SOURCE` | `live` | `static` uses `data/fashion_dataset.csv` instead of the scraped catalogue |
+| `STYLEAI_CATALOG_TTL_HOURS` | `6` | Re-scrape the brand stores when the snapshot is older than this |
+| `STYLEAI_CATALOG_RETRY_MINUTES` | `30` | Retry a brand whose scrape failed (usually rate limiting) after this long |
+| `STYLEAI_CATALOG_BRANDS` | all | Comma-separated brand keys from `live_catalog/brands.py` to scrape |
+| `STYLEAI_CATALOG_PER_BRAND_CATEGORY` | `80` | Newest products kept per brand and category |
 | `USE_MOCK_SHOPPING_DATA` | `False` | `True` makes the shopping providers return clearly marked `[MOCK]` alternatives (the old Streamlit Customize page forced this on) |
 | `AMAZON_CREDENTIAL_ID`, `AMAZON_CREDENTIAL_SECRET`, `AMAZON_PARTNER_TAG`, `AMAZON_MARKETPLACE` | — | Amazon Creators API (falls back to `.streamlit/secrets.toml` `[amazon]` if unset) |
 | `FLIPKART_AFFILIATE_ID`, `MEESHO_API_KEY`, `SHOPSY_API_KEY` | — | Mark those providers as configured (their live search is not implemented yet — see Limitations) |
@@ -90,9 +127,11 @@ Frontend (`frontend/.env.local`, see `frontend/.env.example`): `VITE_API_BASE_UR
 
 | Method | Path | Wraps |
 | ------ | ---- | ----- |
-| GET | `/api/health` | dataset load check |
+| GET | `/api/health` | dataset load check (+ `catalog_source`: `live` / `static-fallback` / `static`) |
+| GET | `/api/catalog/status` | live catalogue: last refresh, items per brand/category, scrape errors |
+| POST | `/api/catalog/refresh` | start a background re-scrape of the brand stores |
 | GET | `/api/meta` | `demo_data` palettes, suggestion chips, fabric notes; `skin_tone.PALETTES`; score weights |
-| GET | `/api/catalog` | all dataset items |
+| GET | `/api/catalog` | all catalogue items (live products) |
 | POST | `/api/recommendations` | `recommender.recommend_outfits(profile, locked_items, limit)` |
 | POST | `/api/outfits/score` | `recommender.score_single_outfit` |
 | POST | `/api/outfits/replacements` | `recommender.get_replacement_candidates` (top 3) |
@@ -145,7 +184,7 @@ rebuild pipeline (`tools/avatar-pipeline/`) are documented in
 ## Tests
 
 ```bash
-python -m pytest tests -q        # API tests: results must equal direct recommender calls
+python -m pytest tests -q        # API tests (run on the static CSV) + offline live-catalogue tests
 python test_recommender.py       # original recommender smoke script
 cd frontend && npm run build     # type-check + production build
 cd frontend && node scripts/render-avatar-thumbnails.mjs   # re-render studio thumbnails (dev server running)
@@ -170,9 +209,14 @@ cd frontend && node scripts/verify-avatar.mjs              # end-to-end avatar c
 - **Garments are static fits**, not cloth simulation; the avatar is posed but not animated.
 - **Colour changes are display-only.** The dataset has one colour per item, so "Preview colours on the
   avatar" recolours the 3D garment only; the recommended item, price and score are unchanged.
-- **Product images:** the dataset references image files that are not in the repo, so cards show
-  generated placeholders (same as the Streamlit version). Add files to `images/` to show real photos.
-- **Shopping alternatives:** only the Amazon provider has a live implementation; Flipkart, Meesho and
+- **Product images:** live products show the brand's own product photo. The static fallback CSV
+  references image files that are not in the repo, so its cards show generated placeholders.
+- **Live catalogue:** categories, styles and occasions of scraped products are keyword inferences, not
+  brand-supplied labels. Brands that are not on Shopify or block bots (Myntra, Ajio, ZARA, H&M,
+  Bewakoof, FabIndia) are not scraped. Shopify rate-limits per IP, so a full refresh takes a few
+  minutes and a brand can temporarily fail (its previous products are kept). Prices and stock are as
+  of the last refresh. The legacy Streamlit app still uses the static CSV.
+- **Shopping alternatives:** besides the live brand-store provider, only the Amazon provider has a live implementation; Flipkart, Meesho and
   Shopsy only return `[MOCK]` data when `USE_MOCK_SHOPPING_DATA=True`. With no provider configured, the
   page reports that no external alternatives were found.
 - **Budget:** when no outfit fits the budget, `recommend_outfits` intentionally returns the cheapest

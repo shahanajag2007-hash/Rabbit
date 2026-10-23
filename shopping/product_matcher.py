@@ -9,6 +9,7 @@ class SearchQuery:
         self.style = item.get("style", "")
         self.occasion = item.get("occasion", "")
         self.target_price = float(item.get("price", 0))
+        self.gender = item.get("gender")
         
     def to_keywords(self) -> str:
         # e.g. "White Casual Top"

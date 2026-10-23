@@ -3,3 +3,5 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+data/live_catalog.json
+data/live_catalog.tmp

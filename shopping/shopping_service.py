@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 from .product_matcher import SearchQuery, ShoppingAlternative, BaseShoppingProvider
 
 # Import specific providers
@@ -8,18 +8,22 @@ from .amazon_provider import AmazonProvider
 from .flipkart_provider import FlipkartProvider
 from .meesho_provider import MeeshoProvider
 from .shopsy_provider import ShopsyProvider
+from .brand_store_provider import BrandStoreProvider
 
 # Toggle for development testing
 # USE_MOCK_SHOPPING_DATA is evaluated dynamically now
 
 class ShoppingService:
-    def __init__(self):
+    def __init__(self, catalog_frame: Optional[Callable] = None):
         self.providers: List[BaseShoppingProvider] = [
             AmazonProvider(),
             FlipkartProvider(),
             MeeshoProvider(),
             ShopsyProvider(),
         ]
+        # Live brand-store catalogue (scraped); only when the caller provides one.
+        if catalog_frame is not None:
+            self.providers.insert(0, BrandStoreProvider(catalog_frame))
         
     def find_cheaper_alternatives(self, original_outfit: Dict, budget: float, locked_categories: List[str]) -> Dict[str, Dict]:
         """

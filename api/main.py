@@ -3,6 +3,9 @@
 This module only adapts the existing modules (recommender, skin_tone, avatar_engine,
 demo_data, shopping) to HTTP. The recommendation/scoring logic itself is unchanged.
 
+Products come from the live brand-store catalogue (live_catalog/, scraped and refreshed in the
+background). STYLEAI_CATALOG_SOURCE=static uses the bundled data/fashion_dataset.csv instead.
+
 Run from the repository root:
     uvicorn api.main:app --reload --port 8000
 """
@@ -31,6 +34,7 @@ if str(ROOT) not in sys.path:
 import recommender  # noqa: E402
 from avatar_engine import render_fashion_avatar_svg  # noqa: E402
 from demo_data import DEMO_FABRIC_NOTES, DEMO_PALETTES, DEMO_SUGGESTION_CHIPS  # noqa: E402
+from live_catalog import LiveCatalog  # noqa: E402
 from shopping import ShoppingService  # noqa: E402
 from skin_tone import PALETTES, estimate_skin_tone  # noqa: E402
 
@@ -51,9 +55,23 @@ IMAGE_FOLDERS = [ROOT / "images", ROOT / "static", ROOT / "data", ROOT]
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 _dataset = None
+CATALOG_SOURCE = os.environ.get("STYLEAI_CATALOG_SOURCE", "live").strip().lower()
+live_catalog: Optional[LiveCatalog] = None
+if CATALOG_SOURCE != "static":
+    live_catalog = LiveCatalog(fallback_loader=recommender.load_dataset)
 
 
-def get_dataset():
+@app.on_event("startup")
+def _start_catalog_refresh() -> None:
+    if live_catalog is not None:
+        live_catalog.refresh_async()
+
+
+def get_dataset(gender: Optional[str] = None):
+    """Current products: the live catalogue (filtered to the profile's gender) or the static CSV."""
+    if live_catalog is not None:
+        live_catalog.refresh_async()  # no-op unless the snapshot is stale
+        return live_catalog.frame_for(gender)
     global _dataset
     if _dataset is None:
         _dataset = recommender.load_dataset()
@@ -115,6 +133,11 @@ def serialize_outfit(outfit: Dict) -> Dict:
 
 def _strip_client_fields(item: Dict) -> Dict:
     return {key: val for key, val in item.items() if key != "image_url"}
+
+
+def _gender_of(item: Dict) -> Optional[str]:
+    """Live items carry Men/Women/Unisex; map to the profile's wording for frame_for()."""
+    return {"Men": "Male", "Women": "Female"}.get(str(item.get("gender") or ""))
 
 
 def _outfit_from_client(outfit: "OutfitIn") -> Dict:
@@ -189,7 +212,24 @@ class AvatarSvgRequest(BaseModel):
 @app.get("/api/health")
 def health() -> Dict:
     frame = get_dataset()
-    return {"status": "ok", "dataset_items": int(len(frame))}
+    source = live_catalog.source() if live_catalog is not None else "static"
+    return {"status": "ok", "dataset_items": int(len(frame)), "catalog_source": source}
+
+
+@app.get("/api/catalog/status")
+def catalog_status() -> Dict:
+    """Where products come from, when each brand was last scraped, and any scrape errors."""
+    if live_catalog is None:
+        return {"source": "static", "items": int(len(get_dataset())), "brands": {}}
+    return to_jsonable(live_catalog.status())
+
+
+@app.post("/api/catalog/refresh")
+def catalog_refresh() -> Dict:
+    """Start a background re-scrape of the brand stores (returns immediately)."""
+    if live_catalog is None:
+        raise HTTPException(status_code=409, detail="Live catalogue is disabled (STYLEAI_CATALOG_SOURCE=static).")
+    return {"started": live_catalog.refresh_async(force=True), "status": to_jsonable(live_catalog.status())}
 
 
 @app.get("/api/meta")
@@ -215,7 +255,7 @@ def catalog() -> Dict:
 def recommendations(request: RecommendRequest) -> Dict:
     locked = {cat: _strip_client_fields(item) for cat, item in (request.locked_items or {}).items()}
     outfits = recommender.recommend_outfits(
-        frame=get_dataset(),
+        frame=get_dataset(request.profile.gender),
         user_profile=request.profile.model_dump(),
         locked_items=locked or None,
         limit=request.limit,
@@ -237,7 +277,7 @@ def replacements(request: ReplacementRequest) -> Dict:
         raise HTTPException(status_code=422, detail=f"Unknown category '{request.category}'.")
     outfit = _outfit_from_client(request.outfit)
     candidates = recommender.get_replacement_candidates(
-        get_dataset(), request.category, outfit, request.profile.model_dump()
+        get_dataset(request.profile.gender), request.category, outfit, request.profile.model_dump()
     )
     return {
         "category": request.category,
@@ -250,7 +290,8 @@ def cheaper(request: CheaperRequest) -> Dict:
     required = {"category", "price", "colour"}
     if not required.issubset(request.item):
         raise HTTPException(status_code=422, detail=f"Item must include {sorted(required)}.")
-    alternative = recommender.get_cheaper_alternative(get_dataset(), _strip_client_fields(request.item))
+    item = _strip_client_fields(request.item)
+    alternative = recommender.get_cheaper_alternative(get_dataset(_gender_of(item)), item)
     return {"item": serialize_item(alternative) if alternative else None}
 
 
@@ -259,13 +300,13 @@ def regenerate(request: RegenerateRequest) -> Dict:
     """Same behaviour as the 'Regenerate Unlocked Items' button: locked items stay fixed."""
     outfit = _outfit_from_client(request.outfit)
     locked = {cat: outfit["items"][cat] for cat in request.locked_categories if cat in outfit["items"]}
-    new_outfits = recommender.recommend_outfits(get_dataset(), request.profile.model_dump(), locked_items=locked, limit=1)
+    new_outfits = recommender.recommend_outfits(get_dataset(request.profile.gender), request.profile.model_dump(), locked_items=locked, limit=1)
     return {"outfit": serialize_outfit(new_outfits[0]) if new_outfits else None}
 
 
 @app.post("/api/shopping/alternatives")
 def shopping_alternatives(request: ShoppingRequest) -> Dict:
-    service = ShoppingService()
+    service = ShoppingService(catalog_frame=live_catalog.frame if live_catalog is not None else None)
     alternatives = service.find_cheaper_alternatives(_outfit_from_client(request.outfit), request.budget, request.locked_categories)
     configured = [provider.name for provider in service.providers if provider.is_configured()]
     return {
