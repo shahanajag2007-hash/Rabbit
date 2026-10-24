@@ -4,6 +4,7 @@ import { GarmentColourPreview } from '../components/avatar/GarmentColourPreview'
 import { Alert, Button, Columns, EmptyPanel, Loading } from '../components/common/Widgets'
 import { PageHeader, StepProgress } from '../components/layout/PageHeader'
 import { CustomizePanel } from '../components/outfit/CustomizePanel'
+import { PhotoTryOn } from '../components/outfit/PhotoTryOn'
 import { FabricPanel, WhyPanel } from '../components/outfit/InsightPanels'
 import { OutfitBreakdown } from '../components/outfit/OutfitBreakdown'
 import { useAvatarView } from '../hooks/useAvatar'
@@ -12,13 +13,6 @@ import { useOutfitScore } from '../hooks/useOutfitScore'
 import { useStyleStore } from '../hooks/useStyleStore'
 import { CATEGORIES, type OutfitItem } from '../types'
 import { money } from '../utils/format'
-
-function paletteKeyFor(skin: string): string {
-  if (['Porcelain', 'Light Beige', 'Light'].includes(skin)) return 'Light'
-  if (['Golden Tan', 'Tan'].includes(skin)) return 'Tan'
-  if (['Deep Cocoa', 'Espresso', 'Deep'].includes(skin)) return 'Deep'
-  return 'Medium'
-}
 
 /**
  * Page 5 — "Your Complete Look" (05_Outfit_Details.py), with the functionality of
@@ -33,7 +27,6 @@ export default function CompleteLookPage() {
   const { score, error, loading } = useOutfitScore()
   const items = s.selected_outfit?.items ?? {}
   const itemList = CATEGORIES.map((c) => items[c]).filter(Boolean) as OutfitItem[]
-  const palette = meta?.demo_palettes[paletteKeyFor(s.skin_tone)] ?? []
 
   return (
     <>
@@ -51,15 +44,25 @@ export default function CompleteLookPage() {
           <div className="panel">
             <div className="cols gap-lg showcase">
               <div>
-                <AvatarViewer view={avatarView} outfitItems={items} />
-                <GarmentColourPreview palette={palette} />
+                {/* Exactly one visualisation: the mode chosen on the Avatar page. */}
+                {s.visual_mode === 'photo' ? <PhotoTryOn /> : <AvatarViewer view={avatarView} outfitItems={items} />}
+                <GarmentColourPreview mode={s.visual_mode} />
               </div>
               <div className="hero-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 <div className="page-kicker">STYLING SUMMARY</div>
                 <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#1f162d', marginTop: '0.2rem' }}>Curated {s.occasion} Outfit</div>
                 <div style={{ color: '#5f5a6d', fontSize: '0.9rem', marginTop: '0.4rem', lineHeight: 1.55 }}>
-                  This complete look coordinates your selected <strong>{s.skin_tone}</strong> skin tone palette, <strong>{s.style}</strong> preference, and
-                  stays within your <strong>{money(s.budget)}</strong> budget.
+                  This complete look coordinates your selected <strong>{s.skin_tone}</strong> skin tone palette, <strong>{s.style}</strong> preference, and{' '}
+                  {score && score.total_price > s.budget ? (
+                    <>
+                      is <strong style={{ color: '#dc2626' }}>{money(score.total_price - s.budget)} over</strong> your <strong>{money(s.budget)}</strong> budget — see the
+                      options below.
+                    </>
+                  ) : (
+                    <>
+                      stays within your <strong>{money(s.budget)}</strong> budget.
+                    </>
+                  )}
                 </div>
                 <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                   <div className="stat-card" style={{ flex: 1 }}>

@@ -109,7 +109,7 @@ export function colourToHex(colour: string | undefined): string {
 }
 
 export interface RecommendedOnAvatar {
-  worn: Partial<Record<'top' | 'outerwear' | 'bottom' | 'footwear', WornGarment>>
+  worn: Partial<Record<'top' | 'outerwear' | 'bottom' | 'full' | 'footwear', WornGarment>>
   accessories: AccessoryId[]
   /** Human-readable notes about approximations (shown under the viewer). */
   notes: string[]
@@ -169,7 +169,26 @@ export function recommendedOnAvatar(items: Partial<Record<Category, OutfitItem>>
   const approx = (item: OutfitItem, label: string) => result.notes.push(`${item.item_name} is shown as the closest available 3D garment (${label}) in ${item.colour}.`)
 
   const top = items.Top
-  if (top) {
+  if (top?.covers_bottom) {
+    // A full outfit (set, saree, lehenga, dress, suit) dresses both top and bottom.
+    const color = colourToHex(top.colour)
+    const kind = String(top.subcategory ?? '')
+    if (kind === 'dress' || kind === 'saree' || kind === 'jumpsuit') {
+      result.worn.full = { id: 'dress_full_skirt', color }
+      approx(top, kind === 'saree' ? 'long A-line dress — there is no saree 3D model' : 'long-sleeve A-line dress')
+    } else if (kind === 'suit') {
+      result.worn.full = { id: top.gender === 'Men' ? 'full_suit_double_breasted' : 'full_trouser_suit_f', color }
+    } else if (kind === 'lehenga') {
+      result.worn.top = { id: 'top_striped_blouse', color }
+      result.worn.bottom = { id: 'bottom_long_skirt', color }
+      approx(top, 'blouse with a long full skirt')
+    } else {
+      // Kurta sets, salwar suits and co-ords: the long tunic with salwar-style trousers.
+      result.worn.top = { id: kind === 'coord' ? TOP_ASSET[garmentKind('Top', top.item_name) as TopKind].id : 'top_tunic', color }
+      result.worn.bottom = { id: kind === 'coord' ? 'bottom_suit_trousers' : 'bottom_harem', color }
+      approx(top, kind === 'coord' ? 'matching top and trousers' : 'kurta-style tunic with salwar-style trousers')
+    }
+  } else if (top) {
     const a = TOP_ASSET[garmentKind('Top', top.item_name) as TopKind]
     result.worn[a.slot] = { id: a.id, color: colourToHex(top.colour) }
     if (!a.exact) approx(top, a.id.replace(/^(top|outer)_/, '').replace(/_/g, ' '))

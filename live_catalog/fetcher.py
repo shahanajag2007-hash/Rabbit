@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 import urllib.robotparser
@@ -25,15 +26,36 @@ except ImportError:  # pragma: no cover - optional dependency
 logger = logging.getLogger("styleai.live_catalog")
 
 USER_AGENT = "Mozilla/5.0 (compatible; StyleAIBot/1.0; outfit recommender catalogue refresh)"
-MIN_INTERVAL = 4.0
-GLOBAL_INTERVAL = 3.0
-MAX_RETRIES = 2  # a throttled brand is retried by the next refresh instead
+MIN_INTERVAL = 6.0
+GLOBAL_INTERVAL = 6.0
+MAX_RETRIES = 1  # a throttled brand is retried by the next refresh instead
 MAX_BACKOFF = 90.0
 TIMEOUT = 30
+# Shopify rate-limits per client IP across all of its stores: after a 429 that survives the retry,
+# every store is paused for this long (retrying other stores would only extend the block).
+RATE_LIMIT_PAUSE = float(os.environ.get("STYLEAI_RATE_LIMIT_PAUSE_MINUTES", "20")) * 60
+
+_paused_until = 0.0
+_pause_lock = threading.Lock()
 
 
 class FetchError(Exception):
     pass
+
+
+class RateLimited(FetchError):
+    pass
+
+
+def paused_for() -> float:
+    """Seconds left on the shared rate-limit pause (0 when not paused)."""
+    return max(0.0, _paused_until - time.time())
+
+
+def _pause() -> None:
+    global _paused_until
+    with _pause_lock:
+        _paused_until = max(_paused_until, time.time() + RATE_LIMIT_PAUSE)
 
 
 class PoliteFetcher:
@@ -77,6 +99,8 @@ class PoliteFetcher:
         return parser is None or parser.can_fetch(USER_AGENT, f"https://{domain}{path}")
 
     def get_json(self, domain: str, path: str) -> Dict:
+        if paused_for():
+            raise RateLimited(f"rate-limited by the store platform; paused for {paused_for() / 60:.0f} more min")
         if not self.allowed(domain, path):
             raise FetchError(f"robots.txt disallows {path}")
         url = f"https://{domain}{path}"
@@ -103,6 +127,10 @@ class PoliteFetcher:
             if attempt < self.max_retries:
                 logger.info("%s: %s, retrying in %.0fs", url, last_error, backoff)
                 time.sleep(backoff)
+        if last_error == "HTTP 429":
+            _pause()
+            logger.warning("Rate-limited (HTTP 429); pausing all store fetches for %.0f min", RATE_LIMIT_PAUSE / 60)
+            raise RateLimited(f"HTTP 429 (rate-limited); paused {RATE_LIMIT_PAUSE / 60:.0f} min")
         raise FetchError(f"{last_error} after {self.max_retries + 1} attempts")
 
 

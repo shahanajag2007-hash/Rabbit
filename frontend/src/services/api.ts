@@ -1,10 +1,17 @@
 import type {
   AvatarBuilder,
+  BuilderStep,
   Category,
   Meta,
   Outfit,
   OutfitItem,
+  PaletteSwatch,
+  PhotoValidation,
+  RecommendResponse,
+  TryOnJob,
+  TryOnProvider,
   ScoreResult,
+  SizeHint,
   ShoppingResponse,
   SkinToneAnalysis,
   UserProfile,
@@ -27,7 +34,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
-    response = await fetch(`${API_BASE}${path}`, init)
+    response = await fetch(`${API_BASE}${path}`, { ...init, credentials: 'include' })
   } catch {
     throw new ApiError(
       'Cannot reach the STYLEAI backend. Make sure the API server is running (uvicorn api.main:app --port 8000).',
@@ -64,7 +71,17 @@ export const api = {
   meta: () => request<Meta>('/api/meta'),
 
   recommend: (profile: UserProfile, limit = 3, lockedItems?: Partial<Record<Category, OutfitItem>>) =>
-    post<{ outfits: Outfit[] }>('/api/recommendations', { profile, limit, locked_items: lockedItems }),
+    post<RecommendResponse>('/api/recommendations', { profile, limit, locked_items: lockedItems }),
+
+  palette: (profile: UserProfile) => post<{ swatches: PaletteSwatch[]; unavailable: PaletteSwatch[] }>('/api/palette', { profile }),
+
+  builderOptions: (profile: UserProfile, category: Category, selected: Partial<Record<Category, OutfitItem>>, offset = 0, limit = 8) =>
+    post<BuilderStep>('/api/builder/options', { profile, category, selected, offset, limit }),
+
+  product: (itemId: string) => request<{ item: OutfitItem }>(`/api/products/${encodeURIComponent(itemId)}`),
+
+  sizeHint: (gender: string, height: number, weight: number) =>
+    request<{ hint: SizeHint | null }>(`/api/size-hint?${new URLSearchParams({ gender, height: String(height), weight: String(weight) })}`),
 
   score: (outfit: Outfit, profile: UserProfile) =>
     post<ScoreResult>('/api/outfits/score', { outfit: { items: outfit.items }, profile }),
@@ -72,10 +89,11 @@ export const api = {
   replacements: (category: Category, outfit: Outfit, profile: UserProfile) =>
     post<{ candidates: OutfitItem[] }>('/api/outfits/replacements', { category, outfit: { items: outfit.items }, profile }),
 
-  cheaper: (item: OutfitItem) => post<{ item: OutfitItem | null }>('/api/outfits/cheaper', { item }),
+  cheaper: (item: OutfitItem, profile?: UserProfile, outfit?: Outfit) =>
+    post<{ item: OutfitItem | null }>('/api/outfits/cheaper', { item, profile, outfit: outfit ? { items: outfit.items } : undefined }),
 
   regenerate: (outfit: Outfit, profile: UserProfile, lockedCategories: Category[]) =>
-    post<{ outfit: Outfit | null }>('/api/outfits/regenerate', {
+    post<{ outfit: Outfit | null; notes?: string[] }>('/api/outfits/regenerate', {
       outfit: { items: outfit.items },
       profile,
       locked_categories: lockedCategories,
@@ -93,6 +111,21 @@ export const api = {
     form.append('file', file)
     return request<SkinToneAnalysis>('/api/skin-tone/analyze', { method: 'POST', body: form })
   },
+
+  // Private photo + virtual try-on (session cookie; the photo never goes into browser storage).
+  uploadPhoto: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<PhotoValidation>('/api/photos', { method: 'POST', body: form })
+  },
+  photoStatus: (photoId: string) => request<PhotoValidation>(`/api/photos/${photoId}`),
+  deletePhoto: (photoId: string) => request<{ deleted: boolean }>(`/api/photos/${photoId}`, { method: 'DELETE' }),
+  photoImageUrl: (photoId: string) => `${API_BASE}/api/photos/${photoId}/image`,
+  tryOnProvider: () => request<TryOnProvider>('/api/tryon/provider'),
+  startTryOn: (photoId: string, items: Outfit['items'], consent: boolean) => post<TryOnJob>('/api/tryon', { photo_id: photoId, items, consent }),
+  tryOnStatus: (photoId: string, jobId: string) => request<TryOnJob>(`/api/tryon/${photoId}/${jobId}`),
+  cancelTryOn: (photoId: string, jobId: string) => request<TryOnJob>(`/api/tryon/${photoId}/${jobId}`, { method: 'DELETE' }),
+  tryOnImageUrl: (photoId: string, jobId: string) => `${API_BASE}/api/tryon/${photoId}/${jobId}/image`,
 
   avatarSvg: (params: AvatarBuilder, outfitItems?: Outfit['items']) =>
     post<{ svg: string }>('/api/avatar/svg', { params, outfit_items: outfitItems }),

@@ -40,6 +40,7 @@ CATALOG_PRODUCTS = [
     product(8, "Gold Jhumka Earrings", "Jewellery", ["Women"]),
     product(9, "White Cotton Shirt", "Shirts", ["Men"]),
     product(10, "Grey Linen Trousers", "Trousers", ["Men"], body="Fabric - Pure Linen"),
+    product(11, "Brown Leather Derby Shoes", "Formal Shoes", ["Men"]),
 ]
 
 
@@ -69,8 +70,11 @@ def test_category_uses_head_noun_and_skips_non_outfit_items():
     assert classify_category("Leather Belt", "") == "Accessory"
     assert classify_category("Relaxed Fit Cargo Pants", "") == "Bottom"
     assert classify_category("Chunky Sneakers", "Footwear") == "Shoes"
-    assert classify_category("Floral Maxi Dress", "Dresses") is None
-    assert classify_category("Kurta Set With Dupatta", "Kurta Sets") is None
+    # Full outfits (dresses, kurta sets, sarees) fill the Top slot and cover the Bottom slot.
+    assert classify_category("Floral Maxi Dress", "Dresses") == "Top"
+    assert classify_category("Kurta Set With Dupatta", "Kurta Sets") == "Top"
+    assert classify_category("Cropped Top", "Tops") is None
+    assert classify_category("Cotton Night Suit", "") is None
     assert classify_category("Cotton Trunks Pack of 3", "Innerwear") is None
 
 
@@ -220,3 +224,31 @@ def test_fresh_checkout_starts_from_seed(tmp_path):
     assert len(fresh.frame()) == len(seeded.frame())
     fresh.refresh()
     assert (tmp_path / "b" / "snap.json").exists()  # refreshes go to the local snapshot, never the seed
+
+
+def test_colour_variants_sizes_and_links(tmp_path):
+    raw = product(
+        55, "Relaxed Linen Shirt", "Shirts", ["Men"],
+        options=[{"name": "Color", "position": 1}, {"name": "Size", "position": 2}],
+        variants=[
+            {"id": 501, "price": "1299.00", "available": True, "option1": "Sky Blue", "option2": "M"},
+            {"id": 502, "price": "1299.00", "available": False, "option1": "Sky Blue", "option2": "L"},
+            {"id": 503, "price": "1399.00", "available": True, "option1": "Olive", "option2": "M"},
+        ],
+    )
+
+    class OneProduct(FakeFetcher):
+        def get_json(self, domain, path):
+            return {"products": [raw] + CATALOG_PRODUCTS if "page=1" in path else []}
+
+    catalog = LiveCatalog(snapshot_path=tmp_path / "snap.json", brands=[Brand("demo", "Demo", "demo.example.com")],
+                          fallback_loader=recommender.load_dataset, fetcher_factory=OneProduct)
+    catalog.refresh()
+    blue = catalog.item("demo-55-sky-blue")
+    assert blue["sizes"] == ["M", "L"] and blue["available_sizes"] == ["M"]
+    assert [v["available"] for v in blue["variants"]] == [True, False]
+    assert blue["product_url"].endswith("?variant=501")
+    assert blue["fit"] == "Loose / Oversized"
+    assert {o["colour_label"] for o in blue["colour_options"]} == {"Sky Blue", "Olive"}
+    olive = catalog.item("demo-55-olive")
+    assert olive["price"] == 1399.0 and olive["product_url"].endswith("?variant=503")

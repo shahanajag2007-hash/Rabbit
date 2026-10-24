@@ -21,20 +21,26 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
+if os.environ.get("STYLEAI_SKIP_DOTENV") != "1":  # tests run without the developer's .env
+    from api.settings import load_env  # noqa: E402
+
+    load_env()
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import recommender  # noqa: E402
 from avatar_engine import render_fashion_avatar_svg  # noqa: E402
 from demo_data import DEMO_FABRIC_NOTES, DEMO_PALETTES, DEMO_SUGGESTION_CHIPS  # noqa: E402
-from live_catalog import LiveCatalog  # noqa: E402
+from live_catalog import BRANDS, LiveCatalog  # noqa: E402
+from preferences import parse_preferences  # noqa: E402
+from api import photos, tryon  # noqa: E402
 from shopping import ShoppingService  # noqa: E402
 from skin_tone import PALETTES, estimate_skin_tone  # noqa: E402
 
@@ -48,6 +54,7 @@ app.add_middleware(
     allow_origins=[origin.strip() for origin in _origins.split(",") if origin.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 # Same folders the Streamlit recommendations page searched for product images.
@@ -119,9 +126,24 @@ def image_url_for(item: Dict) -> str:
     return f"https://placehold.co/400x500/e6e4eb/1d1528?text={urllib.parse.quote(str(item.get('item_name', '')))}"
 
 
+LINK_DOMAINS = {brand.domain for brand in BRANDS}
+
+
+def verified_product_url(url: Any) -> Optional[str]:
+    """Only https links on a scraped brand's own domain are shown as product links."""
+    if not isinstance(url, str):
+        return None
+    parsed = urllib.parse.urlparse(url)
+    return url if parsed.scheme == "https" and parsed.hostname in LINK_DOMAINS else None
+
+
 def serialize_item(item: Dict) -> Dict:
     data = to_jsonable(item)
     data["image_url"] = image_url_for(data)
+    if "product_url" in data or "variants" in data:
+        data["product_url"] = verified_product_url(data.get("product_url"))
+        for variant in data.get("variants") or []:
+            variant["url"] = verified_product_url(variant.get("url"))
     return data
 
 
@@ -160,6 +182,13 @@ class UserProfile(BaseModel):
     budget: float = Field(3500.0, gt=0)
     favorite_colours: List[str] = Field(default_factory=list)
     avoid_colours: List[str] = Field(default_factory=list)
+    # Added for personalisation (all optional, so older clients keep working).
+    age: Optional[int] = Field(None, ge=5, le=120)
+    preferred_fit: Optional[str] = None
+    preferred_fabrics: List[str] = Field(default_factory=list)
+    preferred_brands: List[str] = Field(default_factory=list)
+    preference_text: Optional[str] = Field(None, max_length=500)
+    palette_colour: Optional[str] = Field(None, max_length=40)
 
 
 class OutfitIn(BaseModel):
@@ -186,6 +215,25 @@ class ReplacementRequest(BaseModel):
 
 class CheaperRequest(BaseModel):
     item: Dict[str, Any]
+    # Optional context: with them the cheaper item also respects preferences and suits the rest of the outfit.
+    profile: Optional[UserProfile] = None
+    outfit: Optional[OutfitIn] = None
+
+
+class PreferenceRequest(BaseModel):
+    text: str = Field("", max_length=500)
+
+
+class PaletteRequest(BaseModel):
+    profile: UserProfile
+
+
+class BuilderRequest(BaseModel):
+    profile: UserProfile
+    category: str
+    selected: Dict[str, Optional[Dict[str, Any]]] = Field(default_factory=dict)
+    limit: int = Field(8, ge=1, le=40)
+    offset: int = Field(0, ge=0)
 
 
 class RegenerateRequest(BaseModel):
@@ -198,6 +246,12 @@ class ShoppingRequest(BaseModel):
     outfit: OutfitIn
     budget: float = Field(gt=0)
     locked_categories: List[str] = Field(default_factory=list)
+
+
+class TryOnRequest(BaseModel):
+    photo_id: str = Field(min_length=32, max_length=32)
+    items: Dict[str, Dict[str, Any]]
+    consent: bool = False
 
 
 class AvatarSvgRequest(BaseModel):
@@ -225,11 +279,14 @@ def catalog_status() -> Dict:
 
 
 @app.post("/api/catalog/refresh")
-def catalog_refresh() -> Dict:
-    """Start a background re-scrape of the brand stores (returns immediately)."""
+def catalog_refresh(brand: Optional[str] = None) -> Dict:
+    """Start a background re-scrape of the brand stores (all, or one brand key; returns immediately)."""
     if live_catalog is None:
         raise HTTPException(status_code=409, detail="Live catalogue is disabled (STYLEAI_CATALOG_SOURCE=static).")
-    return {"started": live_catalog.refresh_async(force=True), "status": to_jsonable(live_catalog.status())}
+    if brand and brand not in {b.key for b in live_catalog.brands}:
+        raise HTTPException(status_code=404, detail=f"Unknown brand '{brand}'.")
+    started = live_catalog.refresh_async(force=True, only=[brand] if brand else None)
+    return {"started": started, "status": to_jsonable(live_catalog.status())}
 
 
 @app.get("/api/meta")
@@ -254,13 +311,63 @@ def catalog() -> Dict:
 @app.post("/api/recommendations")
 def recommendations(request: RecommendRequest) -> Dict:
     locked = {cat: _strip_client_fields(item) for cat, item in (request.locked_items or {}).items()}
-    outfits = recommender.recommend_outfits(
+    profile = request.profile.model_dump()
+    outfits, notes = recommender.recommend_with_notes(
         frame=get_dataset(request.profile.gender),
-        user_profile=request.profile.model_dump(),
+        user_profile=profile,
         locked_items=locked or None,
         limit=request.limit,
     )
-    return {"profile": request.profile.model_dump(), "outfits": [serialize_outfit(o) for o in outfits]}
+    return {
+        "profile": profile,
+        "outfits": [serialize_outfit(o) for o in outfits],
+        "notes": notes,
+        "understood": parse_preferences(profile.get("preference_text") or "")["understood"],
+        "context": recommender.effective_context(profile),
+    }
+
+
+@app.post("/api/preferences/parse")
+def preferences_parse(request: PreferenceRequest) -> Dict:
+    """What the recommender will act on from the free-text request (rule-based, no LLM)."""
+    return parse_preferences(request.text)
+
+
+@app.post("/api/palette")
+def palette(request: PaletteRequest) -> Dict:
+    """Recommended colours for this profile that real products are available in (with counts)."""
+    return to_jsonable(recommender.colour_palette(get_dataset(request.profile.gender), request.profile.model_dump()))
+
+
+@app.post("/api/builder/options")
+def builder_options(request: BuilderRequest) -> Dict:
+    """One step of the manual outfit builder: ranked products for a category, given the picks so far."""
+    if request.category not in recommender.CATEGORIES:
+        raise HTTPException(status_code=422, detail=f"Unknown category '{request.category}'.")
+    selected = {cat: _strip_client_fields(item) for cat, item in request.selected.items() if item and cat in recommender.CATEGORIES}
+    result = recommender.builder_options(get_dataset(request.profile.gender), request.profile.model_dump(),
+                                         request.category, selected, request.limit, request.offset)
+    result["items"] = [serialize_item(item) for item in result["items"]]
+    return to_jsonable(result)
+
+
+@app.get("/api/products/{item_id}")
+def product_detail(item_id: str) -> Dict:
+    """A catalogue item with its real variants (sizes, prices, links) and in-stock colours."""
+    if live_catalog is not None:
+        item = live_catalog.item(item_id)
+    else:
+        frame = get_dataset()
+        match = frame[frame["item_id"].astype(str) == item_id]
+        item = match.iloc[0].to_dict() if not match.empty else None
+    if item is None:
+        raise HTTPException(status_code=404, detail="This product is no longer in the catalogue.")
+    return {"item": serialize_item(item)}
+
+
+@app.get("/api/size-hint")
+def size_hint(gender: Optional[str] = None, height: Optional[float] = None, weight: Optional[float] = None) -> Dict:
+    return {"hint": recommender.size_hint(gender, height, weight)}
 
 
 @app.post("/api/outfits/score")
@@ -291,7 +398,12 @@ def cheaper(request: CheaperRequest) -> Dict:
     if not required.issubset(request.item):
         raise HTTPException(status_code=422, detail=f"Item must include {sorted(required)}.")
     item = _strip_client_fields(request.item)
-    alternative = recommender.get_cheaper_alternative(get_dataset(_gender_of(item)), item)
+    profile = request.profile.model_dump() if request.profile else None
+    outfit = _outfit_from_client(request.outfit) if request.outfit else None
+    gender = request.profile.gender if request.profile else _gender_of(item)
+    alternative = recommender.get_cheaper_alternative(get_dataset(gender), item, profile, outfit)
+    if alternative is not None and float(alternative["price"]) >= float(item["price"]):  # never call a pricier item "cheaper"
+        alternative = None
     return {"item": serialize_item(alternative) if alternative else None}
 
 
@@ -300,8 +412,10 @@ def regenerate(request: RegenerateRequest) -> Dict:
     """Same behaviour as the 'Regenerate Unlocked Items' button: locked items stay fixed."""
     outfit = _outfit_from_client(request.outfit)
     locked = {cat: outfit["items"][cat] for cat in request.locked_categories if cat in outfit["items"]}
-    new_outfits = recommender.recommend_outfits(get_dataset(request.profile.gender), request.profile.model_dump(), locked_items=locked, limit=1)
-    return {"outfit": serialize_outfit(new_outfits[0]) if new_outfits else None}
+    current = tuple(str(outfit["items"].get(cat, {}).get("item_id", "")) for cat in recommender.CATEGORIES)
+    new_outfits, notes = recommender.recommend_with_notes(get_dataset(request.profile.gender), request.profile.model_dump(),
+                                                          locked_items=locked, exclude_signatures={current}, limit=1)
+    return {"outfit": serialize_outfit(new_outfits[0]) if new_outfits else None, "notes": notes}
 
 
 @app.post("/api/shopping/alternatives")
@@ -344,3 +458,97 @@ def product_image(filename: str):
     if not path or path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
         raise HTTPException(status_code=404, detail="Image not found.")
     return FileResponse(path)
+
+
+# ---------------------------------------------------------------------------
+# Private photos and virtual try-on (see api/photos.py and api/tryon.py)
+# ---------------------------------------------------------------------------
+
+PRIVATE_HEADERS = {"Cache-Control": "private, no-store"}
+
+
+@app.post("/api/photos")
+async def upload_photo(request: Request, response: Response, file: UploadFile = File(...)) -> Dict:
+    """Validate and privately store a full-body photo; returns the validation result (no image data)."""
+    data = await file.read(photos.MAX_UPLOAD_BYTES + 1)
+    image = photos.decode_upload(data)
+    folder = photos.session_dir(request, response, create=True)
+    record = photos.store_upload(folder, image)
+    response.headers.update(PRIVATE_HEADERS)
+    return photos.public_record(record)
+
+
+@app.get("/api/photos/{photo_id}")
+def photo_status(photo_id: str, request: Request) -> Dict:
+    return photos.public_record(photos.load_record(photos.session_dir(request), photo_id))
+
+
+@app.get("/api/photos/{photo_id}/image")
+def photo_image(photo_id: str, request: Request):
+    folder = photos.session_dir(request)
+    photos.load_record(folder, photo_id)
+    image_path, _ = photos.photo_paths(folder, photo_id)
+    return FileResponse(image_path, media_type="image/jpeg", headers=PRIVATE_HEADERS)
+
+
+@app.delete("/api/photos/{photo_id}")
+def remove_photo(photo_id: str, request: Request) -> Dict:
+    """Delete the photo, its derived data (pose, skin tone) and its try-on results."""
+    folder = photos.session_dir(request)
+    photos.load_record(folder, photo_id)
+    photos.delete_photo(folder, photo_id)
+    return {"deleted": True}
+
+
+@app.get("/api/tryon/provider")
+def tryon_provider() -> Dict:
+    return tryon.provider_info()
+
+
+@app.post("/api/tryon")
+def start_tryon(body: TryOnRequest, request: Request) -> Dict:
+    if not body.consent:
+        raise HTTPException(status_code=400, detail="Please agree to send your photo to the try-on service first.")
+    folder = photos.session_dir(request)
+    record = photos.load_record(folder, body.photo_id)
+    if not record.get("accepted"):
+        raise HTTPException(status_code=422, detail="This photo did not pass the full-body checks, so it cannot be used for try-on.")
+    garments = {cat: _strip_client_fields(item) for cat, item in body.items.items() if cat in recommender.CATEGORIES and item}
+    if not garments:
+        raise HTTPException(status_code=422, detail="Select an outfit first.")
+    image_path, _ = photos.photo_paths(folder, body.photo_id)
+    try:
+        return tryon.start_job(folder, body.photo_id, image_path, garments)
+    except tryon.TryOnError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@app.get("/api/tryon/{photo_id}/{job_id}")
+def tryon_status(photo_id: str, job_id: str, request: Request) -> Dict:
+    folder = photos.session_dir(request)
+    photos.load_record(folder, photo_id)
+    job = tryon.read_job(folder, photo_id, job_id) if job_id.isalnum() else None
+    if job is None:
+        raise HTTPException(status_code=404, detail="Try-on not found.")
+    return job
+
+
+@app.delete("/api/tryon/{photo_id}/{job_id}")
+def tryon_cancel(photo_id: str, job_id: str, request: Request) -> Dict:
+    """Stop waiting for a running try-on (a result that still arrives is kept in the private cache)."""
+    folder = photos.session_dir(request)
+    photos.load_record(folder, photo_id)
+    job = tryon.cancel_job(folder, photo_id, job_id) if job_id.isalnum() else None
+    if job is None:
+        raise HTTPException(status_code=404, detail="Try-on not found.")
+    return job
+
+
+@app.get("/api/tryon/{photo_id}/{job_id}/image")
+def tryon_image(photo_id: str, job_id: str, request: Request):
+    folder = photos.session_dir(request)
+    photos.load_record(folder, photo_id)
+    path = tryon.job_dir(folder, photo_id, job_id) / "result.png" if job_id.isalnum() else None
+    if path is None or not path.exists():
+        raise HTTPException(status_code=404, detail="Try-on image not found.")
+    return FileResponse(path, media_type="image/png", headers=PRIVATE_HEADERS)

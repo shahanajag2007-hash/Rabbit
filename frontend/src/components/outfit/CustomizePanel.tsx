@@ -49,8 +49,10 @@ export function CustomizePanel({ score, id }: { score: ScoreResult; id?: string 
     setRegenError(null)
     try {
       const r = await api.regenerate(outfit, selectUserProfile(useStyleStore.getState()), lockedCats)
-      if (r.outfit) s.set({ selected_outfit: r.outfit, shopping_results: null, garment_colour_overrides: {} })
-      else setRegenError('No outfit could be generated with the current locks.')
+      if (r.outfit) {
+        s.set({ selected_outfit: r.outfit, shopping_results: null, garment_colour_overrides: {} })
+        if (r.notes?.length) setRegenError(r.notes.join(' '))
+      } else setRegenError(r.notes?.length ? r.notes.join(' ') : 'No different outfit could be generated with the current locks.')
     } catch (e) {
       setRegenError((e as Error).message)
     } finally {

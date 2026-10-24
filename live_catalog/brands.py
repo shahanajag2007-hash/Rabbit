@@ -32,4 +32,16 @@ BRANDS: tuple[Brand, ...] = (
     Brand("urbanmonkey", "Urban Monkey", "www.urbanmonkey.com", gender="Unisex", max_pages=2),
     Brand("campus", "Campus", "www.campusshoes.com", max_pages=2),
     Brand("redtape", "Red Tape", "www.redtape.com", max_pages=2),
+    # Ethnic / traditional wear (robots.txt allows the public feed on each; checked 2026-10-24).
+    Brand("janasya", "Janasya", "www.janasya.com", gender="Women", max_pages=2),
+    Brand("bunaai", "Bunaai", "www.bunaai.com", gender="Women", max_pages=2),
+    Brand("suta", "Suta", "www.suta.in", gender="Women", max_pages=1),
+    Brand("okhai", "Okhai", "www.okhai.org", max_pages=1),
+    Brand("vastramay", "Vastramay", "www.vastramay.com", max_pages=2),
+    Brand("kisah", "Kisah", "www.kisah.in", gender="Men", max_pages=1),
+    Brand("sojanya", "Sojanya", "www.sojanya.com", gender="Men", max_pages=1),
+    # Traditional footwear and jewellery.
+    Brand("fizzygoblet", "Fizzy Goblet", "www.fizzygoblet.com", gender="Women", max_pages=1),
+    Brand("needledust", "Needledust", "www.needledust.com", gender="Women", max_pages=1),
+    Brand("giva", "Giva", "www.giva.co", gender="Women", max_pages=1),
 )

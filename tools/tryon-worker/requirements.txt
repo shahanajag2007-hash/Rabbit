@@ -1,0 +1,14 @@
+# Installed into tools/tryon-worker/.venv by setup_worker.py (PyTorch itself is installed there too,
+# from the index matching your hardware). Kept separate from the main app's requirements.txt.
+fastapi
+uvicorn
+python-multipart
+pillow
+numpy
+mediapipe
+diffusers>=0.30,<0.36
+transformers>=4.44,<4.57
+accelerate>=0.31
+huggingface_hub>=0.34,<1.0
+tqdm
+packaging

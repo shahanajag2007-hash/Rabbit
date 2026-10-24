@@ -58,6 +58,19 @@ def test_health():
     assert response.json()["dataset_items"] == 50
 
 
+def test_cors_allows_credentials_from_configured_frontend():
+    response = client.options(
+        "/api/photos",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
 @pytest.mark.parametrize("profile", [PROFILE_A, PROFILE_B])
 def test_recommendations_match_recommender_exactly(profile):
     api_outfits = _recommend(profile)

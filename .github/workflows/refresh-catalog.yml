@@ -1,0 +1,43 @@
+# Refreshes the shared product catalogue (data/live_catalog_seed.json) from the brand stores once a day.
+# Running it here instead of on our laptops keeps the scraping load off our home networks: Shopify
+# rate-limits per IP, and a blocked IP also stops that network's browser from opening product links.
+# Teammates get the new products with `git pull`. Run it by hand from the Actions tab when needed.
+name: Refresh product catalogue
+
+on:
+  schedule:
+    - cron: "30 21 * * *"   # 03:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-catalog
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install scraper dependencies
+        run: pip install pandas requests beautifulsoup4
+      - name: Refresh catalogue
+        # Shopify allows only a handful of large feed requests per IP before a pause; wait those out.
+        run: python -m live_catalog refresh --wait-on-limit --max-wait-minutes 150 --write-seed
+      - name: Commit the updated seed
+        run: |
+          if git diff --quiet -- data/live_catalog_seed.json; then
+            echo "No catalogue changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/live_catalog_seed.json
+          git commit -m "Refresh product catalogue"
+          git push

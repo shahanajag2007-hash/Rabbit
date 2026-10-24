@@ -6,6 +6,10 @@ scikit-learn
 requests
 beautifulsoup4
 truststore
+# photo validation (local pose model, models/pose_landmarker_lite.task)
+mediapipe
+# virtual try-on via Hugging Face Spaces; <2 keeps huggingface-hub <1.0 (transformers needs that)
+gradio_client>=1.3,<2
 fastapi
 uvicorn[standard]
 python-multipart

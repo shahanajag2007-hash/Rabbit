@@ -12,18 +12,43 @@ from typing import Dict, Iterable, List, Optional
 
 from bs4 import BeautifulSoup
 
+from .garments import garment_type
+
 # ---------------------------------------------------------------------------
 # Category
 # ---------------------------------------------------------------------------
 
-# Not representable as a single Top/Bottom/Shoes/Accessory slot, or not outfit pieces.
+# Not outfit pieces, or not shown (sleepwear, innerwear, kids, revealing cuts, non-clothing).
 SKIP = re.compile(
-    r"\b(sets?|co-?ords?|combo|pack of|dress(es)?|jumpsuits?|playsuits?|rompers?|sarees?|lehengas?|gowns?|"
-    r"kaftans?|nightwear|night ?suits?|pyjamas?|pajamas?|loungewear|boxers?|briefs?|trunks?|vests? ?innerwear|"
-    r"innerwear|bras?|bralettes?|lingerie|camisoles?|crop|tube top|halter|backless|bodycon|bikini|swim\w*|socks?|perfumes?|fragrances?|"
-    r"deodorants?|gift ?cards?|masks?|kids?|boys?|girls?|infant|test|cleaner|laces|insoles?|phone|cover|"
-    r"stickers?|posters?|mugs?|bottles?|candles?|keychains?|sample)\b"
+    r"\b(combo|pack of|playsuits?|rompers?|nightwear|night ?suits?|nighty|loungewear|lounge set|sleepwear|boxers?|briefs?|"
+    r"trunks?|vests? ?innerwear|innerwear|bras?|bralettes?|lingerie|camisoles?|crop|cropped top|tube top|halter|backless|"
+    r"bodycon|bikini|swim\w*|socks?|perfumes?|fragrances?|deodorants?|gift ?cards?|masks?|kids?|boys?|girls?|infant|test|"
+    r"cleaner|laces|insoles?|phone|cover|stickers?|posters?|mugs?|bottles?|candles?|keychains?|sample)\b"
 )
+# Pieces that cover both the Top and Bottom slots of an outfit: kurta sets, salwar suits, sarees,
+# lehengas, dresses, co-ords, jumpsuits, two-piece suits. They are listed as "Top" with covers_bottom.
+FULL_OUTFIT: List[tuple[str, re.Pattern]] = [
+    ("saree", re.compile(r"\bsarees?\b")),
+    ("lehenga", re.compile(r"\blehengas?\b(?!\s+skirts?)")),
+    ("ethnic_set", re.compile(
+        r"\b(kurtas?|kurtis?|anarkalis?|salwar|sharara|gharara)\s+(sets?|(with|and|&)\s+(palazzos?|pants?|trousers?|dupattas?|salwar|"
+        r"churidars?|shararas?|pyjamas?|pajamas?|leggings|skirts?))\b"
+        r"|\b(suit sets?|salwar suits?|anarkali suits?|kurta pyjama|kurta pajama|kurta sets?|ethnic sets?)\b"
+        r"|\bwith dupatta\b|\b(straight|a-line|anarkali|printed|embroidered|cotton|silk) suits?\b")),
+    ("suit", re.compile(r"\b(two|three|2|3)[- ]piece suits?\b|\bsuits?\b(?!\s+(?:trousers?|pants?|jacket|blazer))")),
+    ("coord", re.compile(r"\bco-?ords?\b|\b(shirts?|tops?|tees?|t-shirts?)\s+(and|&)\s+(pants?|trousers?|skirts?|shorts)\b"
+                         r"|\b(shirts?|tops?|tees?|t-shirts?|shorts|pants?|trousers?|joggers?|skirts?)\s+sets?\b")),
+    ("jumpsuit", re.compile(r"\bjumpsuits?\b")),
+    ("dress", re.compile(r"\b(dress(es)?|gowns?|kaftans?)\b")),
+]
+
+
+def full_outfit_type(title: str, product_type: str) -> Optional[str]:
+    text = _prepare(f"{product_type} {title}")
+    for name, pattern in FULL_OUTFIT:
+        if pattern.search(text):
+            return name
+    return None
 
 CATEGORY_RULES: List[tuple[str, re.Pattern]] = [
     ("Shoes", re.compile(r"\b(sneakers?|shoes?|loafers?|boots?|sandals?|sliders?|slides|flip ?flops?|heels?|juttis?|"
@@ -49,6 +74,8 @@ def _prepare(text: str) -> str:
 def classify_category(title: str, product_type: str) -> Optional[str]:
     if SKIP.search(_prepare(f"{title} {product_type}")):
         return None
+    if full_outfit_type(title, product_type):
+        return "Top"  # fills the Top slot and covers Bottom (see FULL_OUTFIT)
     # The product type is the more reliable signal. Within a text the head noun comes last, so the
     # latest garment word wins ("Denim Jacket" -> Top, "Cap Sleeve Top" -> Top, "Leather Belt" -> Accessory).
     for source in (_prepare(product_type), _prepare(title)):
@@ -161,7 +188,7 @@ STYLE_OCCASIONS = {
     "Trendy": ["Party", "College"],
     "Ethnic": ["Festival", "Traditional Event", "Party"],
     "Elegant": ["Party", "Special Event"],
-    "Minimal": ["Office", "College"],
+    "Minimal": ["College", "Casual Outing"],  # plain basics are not office wear on their own
 }
 TAG_OCCASIONS = [
     (re.compile(r"\b(party|night ?out|evening)\b"), "Party"),
@@ -244,7 +271,8 @@ def extract_fabric(body_html: str, tags: Iterable[str], title: str) -> tuple[Opt
     else:
         # Only real fibre/material words count (not "Sole - EVA", marketing copy or "5% off").
         for source in (line, " ".join(tags), title, text):
-            words = list(dict.fromkeys(m.group(1).strip() for m in _FABRIC_WORD.finditer(source or "")))
+            found = {m.group(1).strip().lower(): m.group(1).strip() for m in reversed(list(_FABRIC_WORD.finditer(source or "")))}
+            words = list(dict.fromkeys(found[w.group(1).strip().lower()] for w in _FABRIC_WORD.finditer(source or "")))
             if words:
                 raw = " ".join(words[:3])
                 break
@@ -268,12 +296,37 @@ def _image(src: str, width: int = 480) -> str:
     return f"{src}{'&' if '?' in src else '?'}width={width}"
 
 
-def _colour_option_index(product: Dict) -> Optional[int]:
+def _option_index(product: Dict, pattern: str) -> Optional[int]:
     for option in product.get("options") or []:
-        if isinstance(option, dict) and re.search(r"colou?r|shade", str(option.get("name", "")), re.I):
+        if isinstance(option, dict) and re.search(pattern, str(option.get("name", "")), re.I):
             position = option.get("position")
             if isinstance(position, int) and 1 <= position <= 3:
                 return position
+    return None
+
+
+def _colour_option_index(product: Dict) -> Optional[int]:
+    return _option_index(product, r"colou?r|shade")
+
+
+def _size_option_index(product: Dict) -> Optional[int]:
+    return _option_index(product, r"size|waist|fit size")
+
+
+_FIT_RULES = [
+    (re.compile(r"\b(oversized?|boxy|drop shoulder)\b"), "Loose / Oversized"),
+    (re.compile(r"\b(relaxed|baggy|loose|wide[- ]leg|straight[- ]leg|comfort fit|parachute|flared?)\b"), "Loose / Oversized"),
+    (re.compile(r"\b(slim|skinny|fitted|tapered|muscle fit|bodycon)\b"), "Slim / Fitted"),
+    (re.compile(r"\b(regular|classic fit|straight fit)\b"), "Regular Fit"),
+]
+
+
+def classify_fit(text: str) -> Optional[str]:
+    """Fit named in the product title/tags, using the Appearance page's fit options; None when not stated."""
+    lowered = text.lower()
+    for pattern, fit in _FIT_RULES:
+        if pattern.search(lowered):
+            return fit
     return None
 
 
@@ -293,6 +346,7 @@ def normalize_product(product: Dict, brand_key: str, brand_name: str, domain: st
     category = classify_category(title, product_type)
     if not title or not category:
         return []
+    full_type = full_outfit_type(title, product_type)
 
     signal = " ".join([title, product_type, " ".join(tags)])
     styles = classify_style(signal)
@@ -302,59 +356,82 @@ def normalize_product(product: Dict, brand_key: str, brand_name: str, domain: st
     gender = title_gender if title_gender != "Unisex" else classify_gender(signal, brand_gender)
     fabric, fabric_tag = extract_fabric(str(product.get("body_html") or ""), tags, title)
 
+    fit = classify_fit(" ".join([title, " ".join(tags)]))
+
     images = product.get("images") or []
     image_by_variant = {vid: img.get("src", "") for img in images for vid in (img.get("variant_ids") or [])}
     default_image = images[0].get("src", "") if images else ""
     colour_index = _colour_option_index(product)
+    size_index = _size_option_index(product)
     fallback_colour = canonical_colour(title) or canonical_colour(" ".join(tags))
+    handle = product.get("handle", "")
+    base_url = f"https://{domain}/products/{handle}"
 
-    groups: Dict[str, List[Dict]] = {}
+    # Group variants by the store's own colour label ("Sky Blue" and "Navy Blue" stay separate).
+    groups: Dict[str, Dict] = {}
     for variant in product.get("variants") or []:
-        if not variant.get("available", True):
-            continue
         try:
             price = float(variant.get("price") or 0)
         except (TypeError, ValueError):
             continue
         if price <= 0:
             continue
-        raw_colour = str(variant.get(f"option{colour_index}") or "") if colour_index else ""
+        raw_colour = str(variant.get(f"option{colour_index}") or "").strip() if colour_index else ""
         colour = canonical_colour(raw_colour) or fallback_colour
         if not colour:
             continue
-        groups.setdefault(colour, []).append({**variant, "_price": price})
+        label = raw_colour.title() if raw_colour and canonical_colour(raw_colour) else colour
+        group = groups.setdefault(label, {"colour": colour, "variants": []})
+        size = str(variant.get(f"option{size_index}") or "").strip() if size_index else ""
+        compare = float(variant.get("compare_at_price") or 0)
+        group["variants"].append({
+            "variant_id": variant.get("id"),
+            "size": size or None,
+            "available": bool(variant.get("available", True)),
+            "price": round(price, 2),
+            "mrp": round(compare, 2) if compare > price else None,
+            "url": f"{base_url}?variant={variant['id']}" if variant.get("id") else base_url,
+            "image": _image((variant.get("featured_image") or {}).get("src") or image_by_variant.get(variant.get("id"), "")),
+        })
 
-    handle = product.get("handle", "")
+    in_stock = {label: g for label, g in groups.items() if any(v["available"] for v in g["variants"])}
     rows = []
-    for colour, variants in groups.items():
-        cheapest = min(variants, key=lambda v: v["_price"])
-        compare = max(float(v.get("compare_at_price") or 0) for v in variants)
-        featured = cheapest.get("featured_image") or {}
-        image = featured.get("src") or next(
-            (image_by_variant[v["id"]] for v in variants if v.get("id") in image_by_variant), default_image
-        )
+    for label, group in in_stock.items():
+        colour, variants = group["colour"], group["variants"]
+        available = [v for v in variants if v["available"]]
+        cheapest = min(available, key=lambda v: v["price"])
+        image = next((v["image"] for v in variants if v["image"]), "") or _image(default_image)
         name = title if brand_name.lower() in title.lower() else f"{brand_name} {title}"
         if product_type and not any(pattern.search(_prepare(title)) for _, pattern in CATEGORY_RULES):
             # "Urban Monkey Utopia" -> "Urban Monkey Utopia Cap": the avatar maps items by their name.
             noun = product_type.strip()
             noun = noun[:-1] if noun.lower().endswith("s") and not noun.lower().endswith("ss") else noun
             name = f"{name} {noun.title()}"
-        if len(groups) > 1 and colour.lower() not in name.lower():
-            name = f"{name} - {colour}"
+        if len(in_stock) > 1 and label.lower() not in name.lower() and colour.lower() not in name.lower():
+            name = f"{name} - {label}"
+        sizes = [v["size"] for v in variants if v["size"]]
         rows.append({
-            "item_id": f"{brand_key}-{product.get('id')}-{colour.lower().replace(' ', '-')}",
+            "item_id": f"{brand_key}-{product.get('id')}-{re.sub(r'[^a-z0-9]+', '-', label.lower()).strip('-')}",
+            "product_id": f"{brand_key}-{product.get('id')}",
             "category": category,
+            "subcategory": full_type or garment_type(category, title, product_type),
+            "covers_bottom": bool(full_type),
             "item_name": name,
             "colour": colour,
+            "colour_label": label,
             "shade": shade_for(colour),
             "style": "|".join(styles),
             "occasion": "|".join(occasions),
-            "price": round(cheapest["_price"], 2),
-            "image": _image(image),
+            "fit": fit,
+            "price": cheapest["price"],
+            "image": image,
             "brand": brand_name,
             "gender": gender,
-            "product_url": f"https://{domain}/products/{handle}" + (f"?variant={cheapest['id']}" if cheapest.get("id") else ""),
-            "mrp": round(compare, 2) if compare > cheapest["_price"] else None,
+            "product_url": cheapest["url"],
+            "mrp": cheapest["mrp"],
+            "sizes": list(dict.fromkeys(sizes)),
+            "available_sizes": list(dict.fromkeys(v["size"] for v in available if v["size"])),
+            "variants": variants,
             "fabric": fabric,
             "fabric_tag": fabric_tag,
             "product_type": product_type,

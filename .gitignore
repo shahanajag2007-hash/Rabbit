@@ -5,3 +5,16 @@ venv/
 .pytest_cache/
 data/live_catalog.json
 data/live_catalog.tmp
+data/raw_catalog/
+var/
+# Local configuration and secrets (see .env.example)
+.env*
+!.env.example
+# Catalogue link check output
+data/link_report.json
+# Try-on worker: virtual env, wheels, downloaded CatVTON source and models, logs
+tools/tryon-worker/.venv/
+tools/tryon-worker/.wheels/
+tools/tryon-worker/vendor/
+tools/tryon-worker/models/
+tools/tryon-worker/*.log

@@ -8,59 +8,123 @@ import { IDENTITIES } from '../constants/options'
 import { useAvatarView } from '../hooks/useAvatar'
 import { useStyleStore } from '../hooks/useStyleStore'
 import { api } from '../services/api'
-import type { SkinToneAnalysis } from '../types'
+import type { TryOnProvider } from '../types'
 
 function PhotoUpload() {
   const set = useStyleStore((s) => s.set)
   const setSkinTone = useStyleStore((s) => s.setSkinTone)
-  const [preview, setPreview] = useState<string | null>(null)
-  const [analysis, setAnalysis] = useState<SkinToneAnalysis | null>(null)
+  const photoId = useStyleStore((s) => s.photo_id)
+  const validation = useStyleStore((s) => s.photo_validation)
+  const consent = useStyleStore((s) => s.tryon_consent)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [applied, setApplied] = useState(false)
+  const [provider, setProvider] = useState<TryOnProvider | null>(null)
 
-  useEffect(() => () => void (preview && URL.revokeObjectURL(preview)), [preview])
+  useEffect(() => {
+    api.tryOnProvider().then(setProvider).catch(() => setProvider(null))
+  }, [])
+
+  // The photo lives on the server (private to this browser session); drop a stale id if it is gone.
+  useEffect(() => {
+    if (!photoId) return
+    api.photoStatus(photoId).catch(() => set({ photo_id: null, photo_validation: null, tryon_job: null }))
+  }, [photoId, set])
 
   async function onFile(file: File | undefined) {
     setError(null)
-    setAnalysis(null)
     setApplied(false)
     if (!file) return
-    if (!['image/jpeg', 'image/png'].includes(file.type)) {
-      setError('Please upload a JPG or PNG image.')
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setError('Please upload a JPG, PNG or WebP image.')
       return
     }
-    setPreview(URL.createObjectURL(file))
     setBusy(true)
     try {
-      const result = await api.analyzeSkinTone(file)
-      setAnalysis(result)
+      if (photoId) await api.deletePhoto(photoId).catch(() => undefined) // replacing: remove the old photo and its data
+      const result = await api.uploadPhoto(file)
       // Keep the detection result separately from the user's manual choice; applying it is explicit.
-      set({ skin_tone_detected: result.skin_tone })
+      set({ photo_id: result.photo_id, photo_validation: result, tryon_job: null, skin_tone_detected: result.skin_tone ?? null })
     } catch (e) {
+      set({ photo_id: null, photo_validation: null, tryon_job: null })
       setError((e as Error).message)
     } finally {
       setBusy(false)
     }
   }
 
+  async function remove() {
+    if (!photoId) return
+    setBusy(true)
+    try {
+      await api.deletePhoto(photoId)
+    } catch {
+      // already gone on the server
+    } finally {
+      set({ photo_id: null, photo_validation: null, tryon_job: null, skin_tone_detected: null, tryon_consent: false })
+      setBusy(false)
+    }
+  }
+
+  const analysis = validation?.skin_tone && validation.skin_rgb ? { skin_tone: validation.skin_tone, dominant_rgb: validation.skin_rgb, palette: validation.palette ?? [] } : null
+
   return (
     <div className="stack">
       <div className="field">
-        <label htmlFor="photo">Upload full-body picture (JPG, PNG)</label>
-        <input id="photo" className="st-input" type="file" accept="image/jpeg,image/png" onChange={(e) => onFile(e.target.files?.[0])} />
+        <label htmlFor="photo">Upload full-body picture (JPG, PNG, WebP · head to feet, one person, good light)</label>
+        <input id="photo" className="st-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => onFile(e.target.files?.[0])} />
       </div>
-      {preview && <img src={preview} alt="Uploaded full-body photo" width={280} style={{ borderRadius: 12 }} />}
-      {preview && !error && <Alert kind="success">Photo uploaded successfully! Your styling engine will use this photo.</Alert>}
-      {busy && <Loading label="Analysing skin tone from your photo…" />}
+      {busy && <Loading label="Checking your photo…" />}
       {error && <Alert kind="error">{error}</Alert>}
+      {photoId && validation && (
+        <div className="row" style={{ alignItems: 'flex-start' }}>
+          <img src={api.photoImageUrl(photoId)} alt="Your uploaded full-body photo" width={220} style={{ borderRadius: 12 }} />
+          <div className="gap-sm" style={{ flex: 1 }}>
+            {validation.accepted ? (
+              <Alert kind="success">Photo uploaded successfully! Your styling engine will use this photo.</Alert>
+            ) : (
+              <Alert kind="error">
+                This photo can't be used for the virtual try-on: {validation.problems.join(' ')} Please upload another photo.
+              </Alert>
+            )}
+            <div className="mini-card gap-sm">
+              {validation.checks.map((c) => (
+                <div key={c.name} style={{ fontSize: '0.82rem' }}>
+                  {c.ok === true ? '✅' : c.ok === false ? '❌' : '❔'} {c.message}
+                </div>
+              ))}
+            </div>
+            <div className="caption">
+              Your photo is stored privately for this browser session only (not public, metadata removed) and is never sent anywhere without your consent below.
+            </div>
+            <Button onClick={remove} disabled={busy}>
+              🗑 Delete my photo and its data
+            </Button>
+          </div>
+        </div>
+      )}
+      {photoId && validation?.accepted && (
+        <label className="st-check mini-card" style={{ alignItems: 'flex-start' }}>
+          <input type="checkbox" checked={consent} disabled={!provider?.configured} onChange={(e) => set({ tryon_consent: e.target.checked })} />
+          <span>
+            {provider?.configured ? (
+              <>
+                I agree to send this photo and the selected product images to <strong>{provider.label}</strong> to generate my virtual try-on. It renders:{' '}
+                {provider.garments.join(', ')}.
+              </>
+            ) : (
+              <>Virtual try-on is not available on this server{provider?.missing ? `: ${provider.missing}` : '.'}</>
+            )}
+          </span>
+        </label>
+      )}
       {analysis && (
         <div className="mini-card row between">
           <div className="row">
             <div style={{ width: 36, height: 36, borderRadius: '50%', background: `rgb(${analysis.dominant_rgb.join(',')})`, border: '2px solid #fff', boxShadow: '0 0 0 1px rgba(0,0,0,.15)' }} />
             <div>
               <div style={{ fontWeight: 800 }}>Detected skin tone: {analysis.skin_tone}</div>
-              <div className="muted">Suggested palette: {analysis.palette.join(', ')} · approximate estimate from the upper-centre of the photo</div>
+              <div className="muted">Suggested palette: {analysis.palette.join(', ')} · approximate estimate from the face area of the photo</div>
             </div>
           </div>
           <Button

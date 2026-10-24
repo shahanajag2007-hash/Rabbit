@@ -10,7 +10,7 @@ import {
   SKIN_TONES,
   type AvatarConfig,
 } from '../components/avatar/avatarCatalog'
-import type { Category, Outfit, OutfitItem, ShoppingResponse, UserProfile } from '../types'
+import type { Category, Outfit, OutfitItem, PhotoValidation, ShoppingResponse, UserProfile } from '../types'
 
 /**
  * Client-side session state. Mirrors the keys of the Streamlit app's st.session_state
@@ -57,9 +57,24 @@ export interface StyleState {
   saved_avatar_looks: Record<string, AvatarConfig>
   selected_avatar_key: string | null
   active_avatar_tab: string
+  /** Server-side id of the uploaded photo (the image itself is never kept in the browser store). */
+  photo_id: string | null
+  /** Validation summary of that photo (what the try-on can rely on). */
+  photo_validation: PhotoValidation | null
+  /** The user agreed to send the photo + garment images to the configured try-on service. */
+  tryon_consent: boolean
+  /** Latest try-on job for the selected outfit (id + the outfit signature it was made for). */
+  tryon_job: { id: string; signature: string } | null
   // Preference analysis
   preference_text: string
+  /** Text the recommender is currently using (set by "Analyze my style"). */
+  applied_preference_text: string
   style_analyzed: boolean
+  /** Colour picked from the Recommended Colour Palette (null = none). */
+  palette_colour: string | null
+  /** "Choose Your Style Manually": items picked so far and the step being shown. */
+  builder_items: Partial<Record<Category, OutfitItem>>
+  builder_step: Category
   // 3. Recommendation
   recommended_outfits: Outfit[]
   // 4. Final outfit (selected recommendation + edits)
@@ -113,8 +128,16 @@ const defaults = {
   saved_avatar_looks: {} as Record<string, AvatarConfig>,
   selected_avatar_key: null as string | null,
   active_avatar_tab: 'appearance',
+  photo_id: null as string | null,
+  photo_validation: null as PhotoValidation | null,
+  tryon_consent: false,
+  tryon_job: null as { id: string; signature: string } | null,
   preference_text: '',
+  applied_preference_text: '',
   style_analyzed: false,
+  palette_colour: null as string | null,
+  builder_items: {} as Partial<Record<Category, OutfitItem>>,
+  builder_step: 'Top' as Category,
   recommended_outfits: [] as Outfit[],
   selected_outfit: null,
   locked_items: { Top: false, Bottom: false, Shoes: false, Accessory: false },
@@ -266,5 +289,11 @@ export function selectUserProfile(s: StyleState): UserProfile {
     budget: s.budget,
     favorite_colours: s.favorite_colours,
     avoid_colours: s.avoid_colours,
+    age: s.age,
+    preferred_fit: s.preferred_fit,
+    preferred_fabrics: s.preferred_fabrics,
+    preferred_brands: s.preferred_brands,
+    preference_text: s.applied_preference_text,
+    palette_colour: s.palette_colour,
   }
 }

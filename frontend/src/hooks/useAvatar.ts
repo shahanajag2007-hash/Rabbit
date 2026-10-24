@@ -86,6 +86,8 @@ export function useAvatarView(mode: 'studio' | 'outfit'): AvatarView {
         delete worn.full
         Object.assign(worn, separates(config))
       }
+      // A set / saree / dress / suit in the Top slot covers the bottom and any one-piece too.
+      if (items.Top?.covers_bottom) slotOf.Top = ['top', 'outerwear', 'bottom', 'full']
       for (const category of Object.keys(slotOf) as Category[]) {
         if (!items[category]) continue
         for (const slot of slotOf[category]) delete worn[slot]

@@ -2,6 +2,8 @@ import { useNavigate } from 'react-router-dom'
 import { AvatarViewer } from '../components/avatar/AvatarViewer'
 import { Button, Columns, EmptyPanel } from '../components/common/Widgets'
 import { PageHeader } from '../components/layout/PageHeader'
+import { PhotoTryOn } from '../components/outfit/PhotoTryOn'
+import { ProductLink } from '../components/outfit/ProductCard'
 import { CATEGORY_ICONS } from '../constants/options'
 import { useAvatarView } from '../hooks/useAvatar'
 import { useStyleStore } from '../hooks/useStyleStore'
@@ -30,7 +32,7 @@ export default function FinalLookPage() {
       ) : (
         <div className="panel">
           <div className="cols gap-lg final-look">
-            <AvatarViewer view={avatarView} outfitItems={items} height={600} />
+            {s.visual_mode === 'photo' ? <PhotoTryOn height={600} /> : <AvatarViewer view={avatarView} outfitItems={items} height={600} />}
             <div className="hero-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <div className="page-kicker">STYLING READY</div>
               <div style={{ fontSize: '2rem', fontWeight: 900, color: '#1f162d', marginTop: '0.2rem' }}>
@@ -50,7 +52,8 @@ export default function FinalLookPage() {
                   <div key={String(item.item_id)} className="row between" style={{ fontSize: '0.88rem' }}>
                     <span>
                       {CATEGORY_ICONS[String(item.category)]} {item.item_name}
-                      {s.locked_items[item.category as keyof typeof s.locked_items] ? ' 🔒' : ''}
+                      {item.selected_size ? ` · Size ${item.selected_size}` : ''}
+                      {s.locked_items[item.category as keyof typeof s.locked_items] ? ' 🔒' : ''} <ProductLink item={item} label="Buy" />
                     </span>
                     <strong>{money(item.price)}</strong>
                   </div>
