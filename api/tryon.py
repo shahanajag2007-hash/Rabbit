@@ -344,13 +344,35 @@ def job_dir(folder: Path, photo_id: str, job_id: str) -> Path:
 
 def read_job(folder: Path, photo_id: str, job_id: str) -> Optional[Dict]:
     path = job_dir(folder, photo_id, job_id) / "job.json"
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    if not path.exists():
+        return None
+    for _ in range(5):
+        try:
+            content = path.read_text(encoding="utf-8").strip()
+            if not content:
+                time.sleep(0.01)
+                continue
+            return json.loads(content)
+        except (json.JSONDecodeError, OSError):
+            time.sleep(0.01)
+    return None
 
 
 def _write_job(folder: Path, photo_id: str, job: Dict) -> None:
     path = job_dir(folder, photo_id, job["job_id"])
     path.mkdir(parents=True, exist_ok=True)
-    (path / "job.json").write_text(json.dumps(job), encoding="utf-8")
+    target = path / "job.json"
+    tmp = path / f"job.json.{threading.get_ident()}.tmp"
+    try:
+        tmp.write_text(json.dumps(job), encoding="utf-8")
+        tmp.replace(target)
+    except OSError:
+        target.write_text(json.dumps(job), encoding="utf-8")
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def start_job(folder: Path, photo_id: str, photo_path: Path, garments: Dict[str, Dict]) -> Dict:

@@ -58,7 +58,7 @@ CLASHES = [{"red", "green"}, {"red", "pink"}, {"orange", "pink"}, {"red", "orang
 LAYER_WORDS = re.compile(r"\b(jacket|hoodie|overshirt|shacket|cardigan|blazer|coat|sweater|sweatshirt|pullover)\b", re.I)
 NEON_WORDS = re.compile(r"\b(neon|fluorescent|highlighter)\b", re.I)
 # Not shown to users under 18 (the scraper already skips lingerie, crop/halter/backless tops).
-ADULT_WORDS = re.compile(r"\b(sexy|lingerie|bodycon|plunge|deep[- ]neck|backless|halter|mini ?skirt|crop|bralette|thong|beer|whisk(e)?y|vodka|wine glass|vape|smok\w*|hookah)\b", re.I)
+ADULT_WORDS = re.compile(r"\b(sexy|lingerie|bodycon|plunge|deep[- ]neck|backless|halter|mini ?skirt|crop\w*|bralette|thong|beer|whisk(e)?y|vodka|wine glass|vape|smok\w*|hookah)\b", re.I)
 # Gentle age affinity (never a filter; the user's own style choice always outweighs it).
 AGE_AFFINITY = [
     (0, 18, {"Casual", "Trendy", "Streetwear", "Minimal"}, {"Formal", "Elegant"}),

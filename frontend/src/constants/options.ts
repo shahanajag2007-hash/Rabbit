@@ -50,7 +50,36 @@ export const OCCASIONS: [name: string, icon: string, description: string][] = [
 export const FITS = ['Loose / Oversized', 'Regular Fit', 'Slim / Fitted']
 export const FABRICS = ['Breathable Linen', 'Crisp Cotton Blend', 'Classic Denim', 'Silk & Satin', 'Soft Supima Cotton', 'Handloom Khadi']
 export const AVOID_OPTIONS = ['Neon / Flashy', 'Overly Bright', 'Dense Layering', 'Clashing Tones', 'Pastels']
-export const BRANDS = ['ZARA', 'UNIQLO', 'H&M', 'FabIndia', 'Mango', "Levi's", 'Adidas', 'Aldo', 'Myntra']
+export const BRANDS = [
+  'ZARA',
+  'UNIQLO',
+  'H&M',
+  'FabIndia',
+  'Mango',
+  "Levi's",
+  'Adidas',
+  'Aldo',
+  'Myntra',
+  'Snitch',
+  'Powerlook',
+  'Rare Rabbit',
+  'Libas',
+  'Offduty',
+  'Bonkers Corner',
+  'Urban Monkey',
+  'Campus',
+  'Red Tape',
+  'Janasya',
+  'Bunaai',
+  'Suta',
+  'Okhai',
+  'Vastramay',
+  'Kisah',
+  'Sojanya',
+  'Fizzy Goblet',
+  'Needledust',
+  'Giva',
+]
 
 // Avatar studio.
 export const AVATAR_TABS = ['Preset Model', 'Hair & Style', 'Body Shape', 'Skin Tone', 'Accessories']
